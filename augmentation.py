@@ -1,33 +1,38 @@
 import os
 import random
+import numpy as np
 
-#read trace
-#accumulate packets in chunks and put chunks in list(remove packet overhead)
-#create output trace
-#for each chunk in list pick random quality
-#depending on quality, scale chunk size (/2 or /4)
-#create packets by subtracting from chunk size(add packet overhead),
-#   randomize time between packets depending on quality 
 
-#TODO "s" augmentation
 def augmentation():
-    for folder in range(1):
-        #os.mkdir("augmentation/"+str(folder))
-        for trace in range(1):
-            for sample in range(1):
+    print("Loading parameters...")
+    chunkLengthFile = open("augmentation-parameters/chunk-times.txt")
+    chunkLengthFileStr = chunkLengthFile.read()
+    chunkLengths = chunkLengthFileStr.split("\n") 
+    chunkLengths.pop(-1)
+    interArrivalFile = open("augmentation-parameters/normalized-inter-arrivals.txt")   
+    interArrivalFileStr = interArrivalFile.read()
+    interArrivals = interArrivalFileStr.split("\n")
+    interArrivals.pop(-1) 
 
+    print("Augmenting")
+    for folder in range(100):
+        print("Folder", folder)
+        os.mkdir("augmentation/"+str(folder))
+        for trace in range(10):
+            for sample in range(10):
                 if folder >= 10:
-                    filename = "dataset-231121/dataset-231121/none/"+str(folder)+"/00"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log"
-                    #f = open("augmentation/"+str(folder)+"/00"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log", "w+")
+                    filename = "../../data/dataset-231121/none/"+str(folder)+"/00"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log"
+                    f = open("augmentation/"+str(folder)+"/00"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log", "w+")
                 else:
-                    filename = "dataset-231121/dataset-231121/none/"+str(folder)+"/000"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log"
-                    #f = open("augmentation/"+str(folder)+"/000"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log", "w+")
+                    filename = "../../data/dataset-231121/none/"+str(folder)+"/000"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log"
+                    f = open("augmentation/"+str(folder)+"/000"+str(folder)+"-000"+str(trace)+"-000"+str(sample)+".log", "w+")
 
                 file = open(filename)
                 file_str = file.read()
                 s = file_str.split("\n")
-                chunks = []
+                chunkSizes = []
                 startTimes = []
+                chunkStart = True
                 currentChunkSize = 0
                 currentChunkEnd = 2*1000*1000*1000
                 for line in s:
@@ -35,75 +40,86 @@ def augmentation():
                     if len(parts) < 3:
                         continue
 
-                    #todo
                     if parts[1] == "s":
                         continue
-
-                    if currentChunkSize == 0:
+                           
+                    if chunkStart:
                         startTimes.append(float(parts[0]))
-
+                        chunkStart = False
+                    
                     if float(parts[0]) < currentChunkEnd:
-                        currentChunkSize += float(parts[2])-50#remove packet overhead
+                        currentChunkSize += float(parts[2])-52#Remove packet overhead
                     else:
-                        chunks.append(currentChunkSize)
+                        chunkSizes.append(currentChunkSize)
                         currentChunkSize = 0
+                        chunkStart = True
                         currentChunkEnd += 2*1000*1000*1000
 
-                startTimes.append(startTimes[-1]+2*1000*1000*1000)    
+                startTimes.pop(0)
+
                 quality = 2
                 time = 0
 
-                for i in range(len(chunks)):
-                    chunk = chunks[i]
-                    if random.randint(0, 99) < 10:#Tune random, quality switch
+                for i in range(len(chunkSizes)):
+                    chunkSize = chunkSizes[i]
+                    if random.randint(0, 99) < 5:
                         qualityRandom = random.randint(0, 99)
                         if quality == 1:
-                            if qualityRandom < 27:
+                            if qualityRandom < 52:
                                 quality = 4
                             else:
                                 quality = 2
                         elif quality == 2:
-                            if qualityRandom < 45:
+                            if qualityRandom < 87:
                                 quality = 4
                             else:
                                 quality = 1
                         else:
-                            if qualityRandom < 21:
-                                quality = 1
-                            else:
+                            if qualityRandom < 90:
                                 quality = 2
+                            else:
+                                quality = 1
 
-                    chunk *= quality/4
+                    #Scale chunksize based on quality
+                    chunkSize *= quality/4 
 
                     packetString = ""
-                    packets = chunk/(1500-50) #change to correct overhead
-                    if packets < 3:
-                        print(packets)
-                    maxTime = (startTimes[i+1]-startTimes[i])/packets
+
+                    #Pick chunk length
+                    chunkLengthIndex = random.randint(0, len(chunkLengths)-1)
+                    chunkLength = float(chunkLengths[chunkLengthIndex])
+
+                    #Calculate required packets
+                    packets = chunkSize/(1500-52)
+                    packets = int(packets+0.5) #Convert to whole packets
+
+                    #Time per packet
+                    defaultTimePerPacket = chunkLength/packets
+
+                    #If gap between chunks, apply gap
+                    if time < startTimes[i]:
+                        time = startTimes[i]                   
 
                     while(True):
-                        #append time,r,
-                        if time < startTimes[i]:
-                            time = startTimes[i]
-                        time += random.randrange(1000, int(maxTime))#change 5000 to maxTime/X
-                        packetString += str(int(time))+",r,"
+                        #Pick random factor from inter arrival times
+                        interArrivalIndex = random.randint(0, len(interArrivals)-1)
+                        interArrivalFactor = float(interArrivals[interArrivalIndex])
 
-                        #append size
-                        if chunk > 1500-50: #1500-overhead per packet
-                            packetString += "1500"           
+                        time += defaultTimePerPacket*interArrivalFactor
+
+                        packetString += str(int(time))
+
+                        if chunkSize > 1500-52: #1500-overhead per packet
+                            packetString += ",r,1500"           
                             packetString += "\n"
-                            #f.write(packetString)
-                            print(packetString)
+                            f.write(packetString)
                             packetString = ""
-                            chunk -= 1500-50#-50 #fix overhead per packet
+                            chunkSize -= 1500-52#-52 per packet
                         else:
-                            packetString+= str(int(chunk+50)) #change to appropriate packet overhead
+                            packetString+= ",r,"+str(int(chunkSize+52)) #Packet overhead
                             packetString += "\n"
-                            #f.write(packetString)
-                            print(packetString)
-                            print("---")
+                            f.write(packetString)
                             packetString = ""
                             break
-                    #break
 
 augmentation()
